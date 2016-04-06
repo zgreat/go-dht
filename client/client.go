@@ -11,7 +11,7 @@ import (
 
 // New connects to an already existing node and handshakes with it,
 // creating our first connection
-func New(host string, key util.Key, cryptKey []byte) node.Node {
+func New(host string, systemPort uint16, key util.Key, cryptKey []byte) node.Node {
 	conn, err := net.Dial("tcp", host)
 	if err != nil {
 		log.Println("[!] unable to dial host", host, ":", err.Error())
@@ -29,10 +29,13 @@ func New(host string, key util.Key, cryptKey []byte) node.Node {
 		return nil
 	}
 
+	serverPort := handshakeA.GetArgs()["systemPort"].(uint64)
 	iv := handshakeA.GetArgs()["iv"].([]byte)
 
 	serverKey := handshakeA.GetSourceKey()
-	handshakeB := node.NewMessage(key, serverKey, "handshake", nil)
+	handshakeB := node.NewMessage(key, serverKey, "handshake", make(map[string]interface{}))
+
+	handshakeB.GetArgs()["systemPort"] = systemPort
 
 	if err := enc.Encode(handshakeB); err != nil {
 		log.Println("[!] client handshake 2/3 failed:", err.Error())
@@ -51,7 +54,7 @@ func New(host string, key util.Key, cryptKey []byte) node.Node {
 		return nil
 	}
 
-	n := node.NewNode(serverKey, cryptKey, iv, conn)
+	n := node.NewNode(serverKey, uint16(serverPort), cryptKey, iv, conn)
 
 	return n
 }

@@ -15,11 +15,11 @@ import (
 
 // Server is the interface that handles adding new peers
 type Server interface {
-	Run(newPeers chan node.Node, cryptKey []byte)
+	Run(newPeers chan node.Node, systemPort int, cryptKey []byte)
 
 	GetKey() util.Key
 
-	Handshake(conn net.Conn) util.Key
+	Handshake(serverPort int, conn net.Conn) (util.Key, int)
 }
 
 type server struct {
@@ -53,7 +53,7 @@ func (s *server) GetKey() util.Key {
 	return s.key
 }
 
-func (s *server) Run(newPeers chan node.Node, cryptKey []byte) {
+func (s *server) Run(newPeers chan node.Node, serverPort int, cryptKey []byte) {
 	for {
 		conn, err := s.conn.Accept()
 		if err != nil {
@@ -66,7 +66,7 @@ func (s *server) Run(newPeers chan node.Node, cryptKey []byte) {
 		}
 
 		func() {
-			peerKey := s.Handshake(conn)
+			peerKey, systemPort := s.Handshake(serverPort, conn)
 			if peerKey.Equals(util.NullKey) {
 				log.Println("[*] error handshaking with new peer")
 				return
@@ -74,17 +74,18 @@ func (s *server) Run(newPeers chan node.Node, cryptKey []byte) {
 
 			log.Println("[+] new peer connected", peerKey)
 
-			peer := node.NewNode(peerKey, cryptKey, s.iv, conn)
+			peer := node.NewNode(peerKey, uint16(systemPort), cryptKey, s.iv, conn)
 
 			newPeers <- peer
 		}()
 	}
 }
 
-func (s *server) Handshake(conn net.Conn) util.Key {
+func (s *server) Handshake(serverPort int, conn net.Conn) (util.Key, int) {
 	handshakeA := node.NewMessage(s.GetKey(), nil, "handshake", make(map[string]interface{}))
 
 	handshakeA.GetArgs()["iv"] = s.iv
+	handshakeA.GetArgs()["systemPort"] = serverPort
 
 	log.Println("Server Key: ", s.GetKey())
 
@@ -93,24 +94,25 @@ func (s *server) Handshake(conn net.Conn) util.Key {
 
 	if err := enc.Encode(handshakeA); err != nil {
 		log.Println("[*] handshake 1/3 failed:", err.Error())
-		return util.NullKey
+		return util.NullKey, -1
 	}
 
 	var handshakeB node.NodeMessage
 
 	if err := dec.Decode(&handshakeB); err != nil {
 		log.Println("[*] handshake 2/3 failed:", err.Error())
-		return util.NullKey
+		return util.NullKey, -1
 	}
 
 	clientKey := handshakeB.GetSourceKey()
+	systemPort := handshakeB.GetArgs()["systemPort"].(uint64)
 
 	handshakeC := node.NewMessage(s.GetKey(), handshakeB.GetSourceKey(), "ack", nil)
 
 	if err := enc.Encode(handshakeC); err != nil {
 		log.Println("[*] handshake 3/3 failed:", err.Error())
-		return util.NullKey
+		return util.NullKey, -1
 	}
 
-	return clientKey
+	return clientKey, int(systemPort)
 }

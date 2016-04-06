@@ -1,10 +1,12 @@
 package protocol
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"time"
 
+	"github.com/gearmover/gofs2/client"
 	"github.com/gearmover/gofs2/node"
 	"github.com/gearmover/gofs2/util"
 )
@@ -17,6 +19,7 @@ type Protocol interface {
 type protocol struct {
 	Peers    map[string]node.Node
 	ID       util.Key
+	CryptKey []byte
 	IsLeader bool
 }
 
@@ -26,11 +29,12 @@ type gossipNode struct {
 	Port   uint16
 }
 
-func New(id util.Key) Protocol {
+func New(id util.Key, cryptKey []byte) Protocol {
 	return &protocol{
 		Peers:    make(map[string]node.Node),
 		ID:       id,
 		IsLeader: false,
+		CryptKey: cryptKey,
 	}
 }
 
@@ -69,6 +73,25 @@ func (p *protocol) Run(peers chan node.Node) {
 					continue
 				}
 
+				switch msg.GetCommand() {
+				case "gossip":
+					newPeers := msg.GetArgs()["gossip"].([]interface{})
+
+					for _, np := range newPeers {
+
+						tnp := np.([]interface{})
+
+						inp := gossipNode{
+							ID:     util.Key(tnp[0].([]uint8)),
+							IPAddr: net.IP(tnp[1].([]uint8)),
+							Port:   uint16(tnp[2].(uint64)),
+						}
+						if _, ok := p.Peers[inp.ID.String()]; !ok {
+							peers <- client.New(fmt.Sprintf("%s:%d", inp.IPAddr.String(), inp.Port), inp.Port, p.ID, p.CryptKey)
+						}
+					}
+				}
+
 				log.Println("Received message from", v.GetID(), ":", msg.GetCommand())
 			}
 		}
@@ -90,12 +113,12 @@ func (p *protocol) Gossip(peers chan node.Node) {
 				continue
 			}
 
-			ip, port := v.GetHostPort()
+			ip, _ := v.GetHostPort()
 
 			gossip := gossipNode{
 				ID:     v.GetID(),
 				IPAddr: ip,
-				Port:   port,
+				Port:   v.GetSystemPort(),
 			}
 
 			nodes = append(nodes, gossip)

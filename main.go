@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/gearmover/gofs2/client"
 	"github.com/gearmover/gofs2/node"
@@ -19,6 +21,8 @@ func main() {
 		laddr = os.Args[1]
 	}
 
+	systemPort, _ := strconv.Atoi(strings.Split(laddr, ":")[1])
+
 	ourKey := util.NewKey()
 
 	log.Println("Our Key: ", ourKey.String())
@@ -27,14 +31,14 @@ func main() {
 
 	peers := make(chan node.Node, 10)
 
-	go server.Run(peers, []byte("hello world 1234"))
+	go server.Run(peers, systemPort, []byte("hello world 1234"))
 
 	if len(os.Args) > 2 {
 		serverAddr := os.Args[2]
 
 		log.Println("[+] attempting to bootstrap with server", serverAddr)
 
-		peer := client.New(serverAddr, ourKey, []byte("hello world 1234"))
+		peer := client.New(serverAddr, uint16(systemPort), ourKey, []byte("hello world 1234"))
 		if peer == nil {
 			log.Println("[!] unable to bootstrap with server", serverAddr)
 			return
@@ -45,7 +49,7 @@ func main() {
 		peers <- peer
 	}
 
-	proto := protocol.New(ourKey)
+	proto := protocol.New(ourKey, []byte("hello world 1234"))
 
 	proto.Run(peers)
 }

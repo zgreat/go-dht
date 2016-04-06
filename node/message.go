@@ -44,6 +44,10 @@ var (
 	MessageFormat = codec.MsgpackHandle{}
 )
 
+func init() {
+	MessageFormat.StructToArray = true
+}
+
 // NewMessage generates a new message object from the passed in parameters
 func NewMessage(Source, Desired util.Key, Command string, Args map[string]interface{}) Message {
 	m := &NodeMessage{

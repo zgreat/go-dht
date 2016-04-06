@@ -19,6 +19,8 @@ type Node interface {
 	GetCryptKey() []byte
 	GetCryptIV() []byte
 
+	GetSystemPort() uint16
+
 	AddPeer(n Node) error
 	GetPeer(id util.Key) Node
 	RmPeer(id util.Key) error
@@ -46,6 +48,8 @@ type node struct {
 
 	lastSeen time.Time
 
+	systemPort uint16
+
 	outbox chan Message
 	inbox  chan Message
 	done   chan struct{}
@@ -66,24 +70,29 @@ var (
 )
 
 // NewNode generates a new node object using the supplied connection details
-func NewNode(id util.Key, key []byte, iv []byte, conn net.Conn) Node {
+func NewNode(id util.Key, systemPort uint16, key []byte, iv []byte, conn net.Conn) Node {
 	n := &node{
-		id:       id,
-		peers:    make([]Node, 0),
-		conn:     conn,
-		key:      key,
-		iv:       iv,
-		lastSeen: time.Now(),
-		outbox:   make(chan Message, 1),
-		inbox:    make(chan Message, 1),
-		done:     make(chan struct{}),
-		valid:    true,
+		id:         id,
+		peers:      make([]Node, 0),
+		conn:       conn,
+		key:        key,
+		iv:         iv,
+		lastSeen:   time.Now(),
+		systemPort: systemPort,
+		outbox:     make(chan Message, 1),
+		inbox:      make(chan Message, 1),
+		done:       make(chan struct{}),
+		valid:      true,
 	}
 
 	go n.receiveIn()
 	go n.sendOut()
 
 	return n
+}
+
+func (n *node) GetSystemPort() uint16 {
+	return n.systemPort
 }
 
 func (n *node) GetID() util.Key {
@@ -176,6 +185,10 @@ func (n *node) DistanceFrom(k util.Key) util.Key {
 }
 
 func (n *node) SendMessage(m Message, timeout time.Duration) error {
+	if !n.IsValid() {
+		return ErrPeerNotFound
+	}
+
 	timer := time.NewTimer(timeout)
 
 	select {
