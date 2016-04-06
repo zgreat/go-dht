@@ -3,7 +3,12 @@ package main
 import (
 	"log"
 	"os"
-	"time"
+
+	"github.com/gearmover/gofs2/client"
+	"github.com/gearmover/gofs2/node"
+	"github.com/gearmover/gofs2/protocol"
+	"github.com/gearmover/gofs2/server"
+	"github.com/gearmover/gofs2/util"
 )
 
 func main() {
@@ -14,23 +19,22 @@ func main() {
 		laddr = os.Args[1]
 	}
 
-	ourKey := NewKey()
+	ourKey := util.NewKey()
 
 	log.Println("Our Key: ", ourKey.String())
 
-	server := NewServer(laddr, ourKey)
+	server := server.New(laddr, ourKey)
 
-	peers := make(chan Node, 10)
-	msgs := make(chan Message, 10)
+	peers := make(chan node.Node, 10)
 
-	go server.Run(peers, msgs)
+	go server.Run(peers, []byte("hello world 1234"))
 
 	if len(os.Args) > 2 {
 		serverAddr := os.Args[2]
 
 		log.Println("[+] attempting to bootstrap with server", serverAddr)
 
-		peer := Bootstrap(serverAddr, ourKey, msgs)
+		peer := client.New(serverAddr, ourKey, []byte("hello world 1234"))
 		if peer == nil {
 			log.Println("[!] unable to bootstrap with server", serverAddr)
 			return
@@ -41,30 +45,7 @@ func main() {
 		peers <- peer
 	}
 
-	Nodes := make([]Node, 0)
+	proto := protocol.New(ourKey)
 
-	heartbeat := time.NewTicker(5 * time.Second)
-
-	for {
-		select {
-		case m := <-msgs:
-			log.Println(" Message:", m)
-		case p := <-peers:
-			log.Println("New Peer:", p.GetID().String())
-
-			Nodes = append(Nodes, p)
-		case <-heartbeat.C:
-			log.Println(Nodes)
-			for i, v := range Nodes {
-				if !v.IsValid() {
-					log.Println("[*] deleting invalid node from node list:", v.GetID().String())
-					Nodes = append(Nodes[:i], Nodes[(i+1):]...)
-					continue
-				}
-				log.Println("[+] sending heartbeat to", v.GetID().String())
-				beat := NewMessage(ourKey, v.GetID(), "heartbeat", nil)
-				v.SendMessage(beat, time.Second*1)
-			}
-		}
-	}
+	proto.Run(peers)
 }
