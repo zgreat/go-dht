@@ -32,8 +32,11 @@ type Node interface {
 
 	DistanceFrom(key util.Key) util.Key
 
+	Refresh()
+
 	SendMessage(m Message, timeout time.Duration) error
 	ReceiveMessage(timeout time.Duration) (Message, error)
+	RequeueMessage(m Message, timeout time.Duration) error
 }
 
 type node struct {
@@ -107,6 +110,10 @@ func (n *node) IsValid() bool {
 	return n.valid
 }
 
+func (n *node) Refresh() {
+	n.lastSeen = time.Now()
+}
+
 func (n *node) GetCryptKey() []byte {
 	return n.key
 }
@@ -127,8 +134,8 @@ func (n *node) GetHostPort() (net.IP, uint16) {
 func (n *node) GetClosestPeers(k uint) []Node {
 	ids := make([]util.Key, len(n.peers))
 
-	for i, k := range n.peers {
-		ids[i] = k.DistanceFrom(n.GetID())
+	for i, y := range n.peers {
+		ids[i] = y.DistanceFrom(n.GetID())
 	}
 
 	sort.Sort(util.ByKey(ids))
@@ -212,6 +219,18 @@ func (n *node) ReceiveMessage(timeout time.Duration) (Message, error) {
 	}
 
 	return msg, nil
+}
+
+func (n *node) RequeueMessage(m Message, timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+
+	select {
+	case n.inbox <- m:
+	case <-timer.C:
+		return ErrTimeout
+	}
+
+	return nil
 }
 
 func (n *node) Close() error {

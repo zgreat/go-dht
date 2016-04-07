@@ -44,28 +44,47 @@ func (p *protocol) Run(peers chan node.Node) {
 
 	gossipPeers := make(chan node.Node, 1)
 
+	var result node.Node
+
+	_ = result
+
 	go p.Gossip(gossipPeers)
 
 	for {
 		select {
 		case peer := <-peers:
-			p.Peers[peer.GetID().String()] = peer
-
-			log.Println("[+] new peer added:", peer.GetID())
+			if p.Peers == nil {
+				log.Printf("p.Peers == nil")
+			} else if peer == nil {
+				log.Printf("peer == nil")
+			} else if peer.GetID() == nil {
+				log.Printf("peer.GetID() == nil")
+			} else {
+				if _, ok := p.Peers[peer.GetID().String()]; !ok {
+					p.Peers[peer.GetID().String()] = peer
+					log.Println("[+] new peer added:", peer.GetID())
+				}
+			}
 		case <-heartbeat.C:
 			for _, v := range p.Peers {
 				if !v.IsValid() {
+					log.Printf("[*] removing peer %s", v.GetID().String())
 					delete(p.Peers, v.GetID().String())
 					continue
 				}
+
+				log.Println("[*] sending heartbeat to", v.GetID().String())
 
 				msg := node.NewMessage(p.ID, v.GetID(), "heartbeat", nil)
 				v.SendMessage(msg, 1*time.Second)
 			}
 		case <-gossip.C:
-			for _, v := range p.Peers {
-				gossipPeers <- v
-			}
+			go func() {
+				for _, v := range p.Peers {
+					gossipPeers <- v
+					time.Sleep(30 * time.Millisecond)
+				}
+			}()
 		default:
 			for _, v := range p.Peers {
 				msg, err := v.ReceiveMessage(1 * time.Millisecond)
@@ -86,13 +105,46 @@ func (p *protocol) Run(peers chan node.Node) {
 							IPAddr: net.IP(tnp[1].([]uint8)),
 							Port:   uint16(tnp[2].(uint64)),
 						}
+
 						if _, ok := p.Peers[inp.ID.String()]; !ok {
 							peers <- client.New(fmt.Sprintf("%s:%d", inp.IPAddr.String(), inp.Port), inp.Port, p.ID, p.CryptKey)
 						}
 					}
-				}
+				case "heartbeat":
+					p.Peers[msg.GetSourceKey().String()].Refresh()
 
-				log.Println("Received message from", v.GetID(), ":", msg.GetCommand())
+					log.Println("[*] received heartbeat from", msg.GetSourceKey().String())
+				case "query_leader":
+					if p.IsLeader {
+						reply := node.NewMessage(p.ID, v.GetID(), "query_leader", make(map[string]interface{}))
+
+						reply.GetArgs()["leader"] = p.ID
+
+						v.SendMessage(reply, 1*time.Second)
+					} else {
+						if msg.GetArgs()["hops"].(uint64) > 3 {
+							reply := node.NewMessage(p.ID, v.GetID(), "query_leader", nil)
+
+							v.SendMessage(reply, 1*time.Second)
+						} else {
+							for _, others := range p.Peers {
+								if v.GetID().Equals(others.GetID()) {
+									continue
+								}
+
+								newMsg := node.NewMessage(p.ID, others.GetID(), "query_leader", nil)
+
+								others.SendMessage(newMsg, 1*time.Second)
+
+								reply, _ := others.ReceiveMessage(5 * time.Second)
+
+								_ = reply
+
+							}
+
+						}
+					}
+				}
 			}
 		}
 	}
